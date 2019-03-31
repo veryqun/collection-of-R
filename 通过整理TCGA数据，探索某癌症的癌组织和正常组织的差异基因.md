@@ -1,4 +1,3 @@
-
 # 实验设计
 实验目的决定试验方法和途径。
 **试验目的** :获取三阴性乳腺癌的正常组织和癌症组织的基因表达差异情况，比较三阴性乳腺癌中的基因表达变化情况。
@@ -44,7 +43,7 @@ table(phenotype_file$lab_proc_her2_neu_immunohistochemistry_receptor_status)
 ```
 ![talbe](https://img-blog.csdnimg.cn/20190331154407709.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80NDQ1MjE4Nw==,size_16,color_FFFFFF,t_70)
 ### 列出三项指标的列表，方便筛选
-
+**实验设计**：查找三项指标的列并列出
 ```shell  @R
 colnames_num <- grep("receptor_status",colnames(phenotype_file))
 #在phenotype_file列中检索“receptor_status”,grep返回值是列名的列表中包含有“receptor_status”的列序号，因为三阴性乳腺癌的三项指标在这里都有phenotype_file字段
@@ -75,17 +74,143 @@ eph <- phenotype_file[,colnames_num[1:3]]
 # 5     7     9 
 ```
 ### TNBC的筛选
+实验设计：查找指标的状态并统计；列出三阴性并筛选出来这些数据
 ```shell  @R
 tnbc_rownum <- apply(eph,1,function(x)sum(x=="Negative"))
 #eph：记录三项指标类型的矩阵
 #将eph按照列执行sum(x=="Negative"):统计各行中，eph列中有Negative的数量
-#question
+#通过查看阴性的数量，函数返回结果是一个数字向量。内容是0或1、2、3。注意数字的排列顺序是对应病人ID的行。
 tnbc_rownum
 tnbc_sample <- phenotype_file[tnbc_rownum == 3, 1]
-#统计每一行中数值是3的（即全为“Negative”）并取第一列
+#通过让 tnbc_rownum==3 判别，如果成立，会返回一个logical向量，logical向量是可以直接被矩阵引用的，只会读取TURE的行或着列
+#统计每一行中数值是3的（即全为“Negative”）并取第一列即病人ID
+#tnbc_sample：存储着三阴性乳腺癌的
 tnbc_sample
 save(tnbc_sample,file = 'tnbc_sample.Rdata')
 #保存Rdata
 ```
+![阴性指标统计](https://img-blog.csdnimg.cn/20190331161025151.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80NDQ1MjE4Nw==,size_16,color_FFFFFF,t_70)
+## 基因表达矩阵的构建  
+### 基因表达矩阵的读取和读取后格式修改
+**实验设计**：转换data.frame ；行名修改；Count值还原
+```shell  @R
+library(data.table)
+#?data.table
+#R中的data.table包提供了一个data.frame的高级版本，让你的程序做数据整型的运算速度大大的增加。
+a <- fread("TCGA-BRCA.htseq_counts.tsv.gz",sep = '\t',header = T)
+#读取表达矩阵文件
+a <- as.data.frame(a)
+#转换为数据框，读取后，转换前的a的类型是"data.table" "data.frame"
+a[1:4,1:4]
+rownames(a) <- a[,1]
+a <- a[,-1]
+#去除第一列，行名修改。
+genes <- row.names(a)
+genes[1:10]
+##接下来还原counts数，网站使用了log2(count+1)进行counts数转换，接下来进行还原
+a <- a^2-1
+#a存储的全是数值型向量，可以直接通过数学处理进行全表修改。
+```
+![RNAseq结果的读取与处理](https://img-blog.csdnimg.cn/20190331165126541.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80NDQ1MjE4Nw==,size_16,color_FFFFFF,t_70)
+### 对表达矩阵进行筛选构建
+**实验设计**：列出TNBC的ID（前半部分），所有病人ID，有双样品类型的seq的病人ID，取TNBC的ID和双样品类型的seq病人ID交集作为目的病人ID。最后用 all_p %in% need_p 构建logical向量，被原始表达矩阵引用，构建符合目的要求的表达矩阵
+```shell  @R
+##接下来是取样本，需要取118个三阴性乳腺癌的样本，并且是成对的样本，即既有癌组织又有癌旁组织。
+tnbc_p <- substring(tnbc_sample,1,12)
+#取tnbc的每个元素的第一个到第12个字符 
+#tnbc是TNBC患者的ID前部分
+all_p <- substring(colnames(a),1,12)
+head(all_p)
+#取表达矩阵的病理号前12位
+table(all_p)
+#这里如果病人号前12位相同，说明是即既有癌组织又有癌旁组织。
+table(all_p) == 2
+paired_p <- names(table(all_p)[table(all_p) == 2])
+#去除所有有两个组织类型的病人ID前部分赋值给paired_id
+need_p <- intersect(tnbc_p,paired_p)
+#need_p是118个是成对的样本。即既有癌组织又有癌旁组织
 
+exprSet <- a[,all_p %in% need_p]
+#构建表达矩阵：三阴性乳腺癌的样本，并且是成对的样本，即既有癌组织又有癌旁组织
+#这里通过 all_p %in% need_p 处理返回一个 logical向量，logical和第一个数据元素all_p一一对应，元素个数和顺序和all_P相同。向量可以在在data.frame中引用，只会读取 TRUE
+```
+![目的表达矩阵](https://img-blog.csdnimg.cn/20190331172815502.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80NDQ1MjE4Nw==,size_16,color_FFFFFF,t_70)
+### 对构建的表达矩阵进行数据筛选
+**实验设计**：利用apply函数统计条件符合情况，然后保存为logical向量，然后利用logical的被引用来筛选
+```shell  @R
+table(apply(exprSet, 1, function(x){sum(x==0)<10}))
+tmp <- apply(exprSet, 1, function(x){sum(x==0)<10})
+#对exprSet进行按行执行函数function：
+#如果表达矩阵是0则取1，在18个样本中，如果这个基因的表达矩阵超过10个样本都是空值，则舍弃这个基因
+#tmp是一个logical向量
+exprSet <- exprSet[tmp,]
+save(exprSet,file = 'tnbc_paired_exprSet.Rdata')
+#保存三阴性乳腺癌的双样本表达矩阵
+```
+
+### 癌症组织和正常组织的区分和标记
+实验设计：利用substr()函数截取患者ID的有效信息位置，用ifelse()函数进行判断，并用factor()函数生成因子型变量。最后赋值得到患者的样品类型
+>Tips：TCGA可以根据第14和第15位判断是癌组织还是癌旁组织。01表示癌症组织，11表示正常组织
+```shell  @R
+#TCGA可以根据第14和第15位判断是癌组织还是癌旁组织。01表示癌症组织，11表示正常组织
+colnames(exprSet)
+#提取列名
+substr(colnames(exprSet),14,15)
+#提取列名字符串的第14和15位置字符
+as.numeric(substr(colnames(exprSet),14,15))
+#现在提取的字符变成数字 '11'和 11不等同
+ifelse(as.numeric(substr(colnames(exprSet),14,15)) < 10,'tumor','normal')
+#判断第14和15号位的数值<10 即等于01时候，返回tumor 否则返回normal
+factor(ifelse(as.numeric(substr(colnames(exprSet),14,15)) < 10,'tumor','normal'))
+#question 把它变成因子型，因子型是有顺序的。这里需要变换成因子型
+group_list=factor(ifelse(as.numeric(substr(colnames(exprSet),14,15)) < 10,'tumor','normal'))
+#group_list记录了表达矩阵中患者ID的对应的组织类型，和表达矩阵的顺序一样。
+table(group_list)
+```
+### 表达矩阵的筛选（应该在上一步一起进行）
+实验设计：修正小于0的（因为变换过程中可能会产生-1，会影响实验），检查并去除na值。
+```shell  @R
+exprSet <- ceiling(exprSet)
+#?ceiling（）取整，不小于变量本身
+#round()以四舍五入形式保存指定小数位数
+#floor()不大于变量本身最大整数
+#table(is.na(exprSet))
+#pmax(),使得矩阵最小值是0？
+save <- exprSet
+exprSet[exprSet<0] <- 0
+table(exprSet<0)
+table(is.na(exprSet))
+```
+![group_list和colData](https://img-blog.csdnimg.cn/20190331195814303.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80NDQ1MjE4Nw==,size_16,color_FFFFFF,t_70)
+# 患者的癌症组织和正常组织的基因差异表达分析
+```shell  @R
+library(DESeq2)
+#构建一个病例号和肿瘤分类的对应关系
+colData <- data.frame(row.names = colnames(exprSet),group_list= group_list)
+#colData:是患者ID号和组织类型的对应关系
+
+#构建DESeq()函数要求的表达式
+dds <- DESeqDataSetFromMatrix(countData = exprSet,colData = colData,design = ~ group_list)
+#countData = exprSet,指出DESeq的表达矩阵
+#colData = colData,知名每个表达矩阵的分类，比如实验组&对照组，正常组织&癌症组织
+#question
+#design= ~group_list，因子型，指出不同组的区别，是有顺序的。
+dds <- DESeqDataSetFromMatrix(countData = exprSet,
+                              colData = colData,
+                              design = ~group_list)
+dds <- DESeq(dds)
+#进行差异基因分析
+resultsNames(dds)
+res <-  results(dds, contrast=c("group_list","tumor","normal"))
+#用group_list来做引导文件，用tumor来比较normal组织
+
+resOrdered <- res[order(res$padj),]
+#把res差异分析文件通过padj来排序
+head(resOrdered)
+resOrdered=as.data.frame(resOrdered)
+#把resOrdered变成数据框，
+write.table(resOrdered, file="single cell DGE order.xls", sep="\t",quote=F)
+#写出差异基因文件
+```
+![DEG文件](https://img-blog.csdnimg.cn/20190331200306640.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80NDQ1MjE4Nw==,size_16,color_FFFFFF,t_70)
 
